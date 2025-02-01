@@ -1,0 +1,316 @@
+===============================================================================
+Network protocol for the system programming chat
+Version 0.1, Summer Semester 2019
+===============================================================================
+
+
+========
+Notation
+========
+
+                     1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+| Element                                                       =
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+=                                                               |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+Element is continued in the next line of the diagram. In this example this
+means: Element starts at bit position 0 and ends at position 63 (including).
+
+
+                     1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+| Element ..................................................... |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+Element has variable length (might also be longer than the box in the graph).
+
+
+=============
+General Notes
+=============
+
+The chat protocol uses TCP as its underlying protocol.
+All integers are sent in network byte order (big endian).
+Every message from client to server and from server to client starts with an
+header of the form given below:
+
+                     1                   2
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+| Type          | Length                        |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+Type (8 bits):			Type of the message, see table below.
+Length (16 bits):		Length of the following additional data of the
+				message, in bytes.
+
+
+=============
+Message Types
+=============
+
++------+------------------+----------------------------------------+---------+
+| Type | Name             | Description                            | Direct. |
++------+------------------+----------------------------------------+---------+
+|    0 | LoginRequest     | Client logs in to the server           | C ==> S |
+|      | (LRQ)            |                                        |         |
++------+------------------+----------------------------------------+---------+
+|    1 | LoginResponse    | Server response to previously sent     | C <== S |
+|      | (LRE)            | login request                          |         |
++------+------------------+----------------------------------------+---------+
+|    2 | Client2Server    | Transport of a text message from a     | C ==> S |
+|      | (C2S)            | client to the server                   |         |
++------+------------------+----------------------------------------+---------+
+|    3 | Server2Client    | Transport of a text message from the   | C <== S |
+|      | (S2C)            | server to a client                     |         |
++------+------------------+----------------------------------------+---------+
+|    4 | UserAdded (UAD)  | Server announces a user to all clients | C <== S |
++------+------------------+----------------------------------------+---------+
+|    5 | UserRemoved      | Server notifies all remaining clients  | C <== S |
+|      | (URM)            | that a user was removed                |         |
++------+------------------+----------------------------------------+---------+
+
+
+Each of these message types has a defined format and meaning, as described in
+the following subsections.
+
+
+------------------
+LoginRequest (LRQ)
+------------------
+
+                     1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+| Type          | Length                        | Magic         =
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+=                                               | Version       |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+| Name ........................................................ |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+Type (8 bits):			here: 0
+Length (16 bits):		5 < Length < 37
+Magic (32 bits):		always 0x0badf00d
+Version (8 bits):		Current version number: 0
+Name (>= 1 byte, <= 31 bytes):	Requested user name, not null-terminated
+
+The LoginRequest message always has to be the first message that is sent from
+the client to the server. If the server detects an invalid type, length or
+magic, it shall close the connection without sending any message back.
+In any other case, it shall send back a LoginResponse message, as given below.
+Names may contain every ASCII character with a value between (including) 33
+and 126, except for the quote ('), the double quote ("), and the backtick (`).
+If the Name field contains an invalid byte, the server shall notify the client
+by setting the Code in the LoginResponse accordingly.
+
+
+-------------------
+LoginResponse (LRE)
+-------------------
+
+                     1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+| Type          | Length                        | Magic         =
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+=                                               | Code          |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+| SName ....................................................... |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+Type (8 bits):			here: 1
+Length (16 bits):		5 < Length < 37
+Magic (32 bits):		always 0xc001c001
+Code (8 bits):			0: success
+				1: name already taken by another user
+				2: name invalid
+				3: protocol version mismatch
+				255: other server error
+SName (>= 1 byte, <= 31 bytes):	Name of the server, not null-terminated.
+
+The LoginResponse message always is the first message the client receives from
+the server. The log in only was successful, if the LoginResponse has the
+correct Type, a valid Length, the correct Magic and Code=0. In any other case,
+the connection shall be closed by the client and the server.
+The rules for allowed server names are the same as for user names.
+If the client detects an invalid server name, it shall drop the connection to
+the server immediately.
+
+
+-------------------
+Client2Server (C2S)
+-------------------
+
+                     1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+| Type          | Length                        | Text ........ |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+Type (8 bits):			here: 2
+Length (16 bits):		Length <= 512
+Text (<= 512 bytes):		Message text as UTF-8 bytes, not
+				null-terminated.
+
+If Text starts with a slash (/), the message shall be considered as a special
+command by the server, which shall be handled in an implementation-defined
+way.
+Otherwise, the message shall be considered to be a regular text message, which
+shall be forwarded to all clients which have been logged in successfully,
+using Server2Client messages, as described below. The Text shall be forwarded
+as-is, i.e. the server does not perform UTF-8 validation.
+If the server receives an invalid command from a client, it shall send back a
+Server2Client message with OriginalSender starting with null and the Text
+containing an implementation-defined error message. The server shall not close
+the connection due to an invalid or failed command.
+
+
+-------------------
+Server2Client (S2C)
+-------------------
+
+                     1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+| Type          | Length                        | Timestamp     =
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+=                                                               =
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+=                                               | OriginalSender=
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+=                                                               =
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+=                                                               =
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+=                                                               =
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+=                                                               =
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+=                                                               =
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+=                                                               =
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+=                                                               =
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+=                                               | Text ........ |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+Type (8 bits):			here: 3
+Length (16 bits):		40 <= Length <= 552
+Timestamp (64 bits):		Server timestamp as seconds since
+				1970-01-01 00:00:00 UTC. Always transferred as
+				Coordinated Universal Time.
+OriginalSender (32 bytes):	User name of the original sender,
+				null-terminated.
+Text (<= 512 bytes):		Message text as UTF-8 bytes, not
+				null-terminated.
+
+If OriginalSender is an empty string, i.e. it starts with a null-byte, then
+the message is considered to be a message sent by the server itself.
+
+The server shall send such messages to inform clients about following
+situations:
+
+	* A client has sent an invalid command to the server. In that case,
+	  the server shall send a Server2Client message with an
+	  implementation-defined Text to the client which has sent the
+	  command.
+
+	* A client has sent a command, for which it does not have the required
+	  permissions. In that case, the server shall also send a
+	  Server2Client message with an implementation-defined Text to the
+	  client which has sent the command.
+
+	* The same applies if a command fails for another reason, or if there
+	  is a general problem with forwarding regular text messages to the
+	  client (like: server message queue is full).
+
+	* The chat has been paused or resumed successfully. In these cases,
+	  the server shall send a Server2Client message containing an
+	  implementation-defined Text to every client that is currently logged
+	  in.
+
+As the following cases are covered by other message types, the server shall
+never send Server2Client messages for these situations:
+
+	* A client has logged in.
+
+	* A client has been removed from the server.
+
+
+---------------
+UserAdded (UAD)
+---------------
+
+                     1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+| Type          | Length                        | Timestamp     =
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+=                                                               =
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+=                                               | Name ........ |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+Type (8 bits):			here: 4
+Length (16 bits):		8 < Length <= 39
+Timestamp (64 bits):		Server timestamp as seconds since
+				1970-01-01 00:00:00 UTC. Always transferred as
+				Coordinated Universal Time.
+Name (>= 1 byte, <= 31 bytes):	Name of the new user, not null-terminated.
+
+After a user has logged in, the server shall notify every client (including
+the new one) about the new client by sending appropriate UserAdded messages,
+containing the current Timestamp and the login Name of the user.
+
+Also, the new user shall be notified about every other client currently logged
+in, also using UserAdded messages. Here the server shall set the Timestamp
+to 0, signalling to the client that the user has already been on the server
+before.
+
+Each client shall only get one UserAdded message for every user. The client
+may warn about duplicates.
+
+
+-----------------
+UserRemoved (URM)
+-----------------
+
+                     1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+| Type          | Length                        | Timestamp     =
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+=                                                               =
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+=                                               | Code          |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+| Name ........................................................ |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+Type (8 bits):			here: 5
+Length (16 bits):		9 < Length <= 40
+Timestamp (64 bits):		Server timestamp as seconds since
+				1970-01-01 00:00:00 UTC. Always transferred as
+				Coordinated Universal Time.
+Code (8 bits):			Reason for removal:
+				0: Connection closed by client
+				1: Kicked from the server
+				2: Communication error
+Name (>= 1 byte, <= 31 bytes):	Name of the removed user, not null-terminated.
+
+When a user is removed from the server, the server shall notify all remaining
+clients (if any) about this and the reason by sending an appropriate
+UserRemoved message to them.
+
+If no user of the given Name is currently known to the client (i.e. it has
+not received a UserAdded message with the same Name before), or if the client
+receives a UserRemoved message containing its own name, it may warn about that.
+
+
+vim: set expandtab softtabstop=8 textwidth=80 spelllang=en

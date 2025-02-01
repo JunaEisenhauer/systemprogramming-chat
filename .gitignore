@@ -1,0 +1,6 @@
+.*
+!.gitignore
+*~
+*.bak
+*.old
+CMakeLists.txt.user
